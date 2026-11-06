@@ -17,10 +17,12 @@ import { keyed } from './key';
    Where each piece is follows where she is (clockAt: when the flight gets there at the usual pace, scaled by the speed she is going), so a
    jump lands where the piece would be; the piece only changes when the stretch does. Stopped, the music goes on quietly; in the worst of
    the storm and in a lightning asked for it draws back.
-   The pieces are not files anyone can take, as OpenTracks asks: each is a script in public/sound/ holding its bytes under a key stream
-   (src/key.ts, dev/music.mjs), undone here in memory and played through Web Audio. Nothing loads and nothing starts until the viewer has
-   touched the page with the sound on, as browsers ask. An iPhone silences what a page plays this way with the switch on its side, as it
-   does a ringtone, unless the page says it is playing, as a video does: so it says so.
+   The pieces are not files anyone can take, as OpenTracks asks: each comes as a few scripts in public/sound/ holding its bytes under a
+   key stream (src/key.ts, dev/music.mjs), undone here in memory and played through Web Audio. The first part is its first twelve seconds
+   and each after it about twice the one before: on a slow line the music starts once the first has come, and as more comes what has come
+   is decoded again and takes over from the shorter, sample for sample. Nothing loads and nothing starts until the viewer has touched the
+   page with the sound on, as browsers ask. An iPhone silences what a page plays this way with the switch on its side, as it does a
+   ringtone, unless the page says it is playing, as a video does: so it says so.
    ?sound writes on the page how the sound stands, for a phone, which has no console.
    ===================================================================== */
 type Id = 'a' | 'b' | 'c';
@@ -54,36 +56,44 @@ function placeOf(kind: Kind, u: number, rate: number){
   return KIND[kind].from;
 }
 
-/* ---------- the pieces: public/sound/<id>.js hands its bytes to flightSound ---------- */
-const asked = new Map<Id, Promise<ArrayBuffer>>(), handed = new Map<Id, (b: ArrayBuffer) => void>();
-(window as unknown as { flightSound: (id: Id, text: string) => void }).flightSound = (id, text) => {
-  const take = handed.get(id); if (!take) return;
-  handed.delete(id);
-  const bin = atob(text), b = new Uint8Array(bin.length);
-  for (let i = 0; i < b.length; i++) b[i] = bin.charCodeAt(i);
-  take(keyed(b, id).buffer as ArrayBuffer);
-};
-function bytesOf(id: Id){
-  let p = asked.get(id);
-  if (!p){
-    p = new Promise<ArrayBuffer>((ok, fail) => {
-      handed.set(id, ok);
-      const s = document.createElement('script'), lost = () => { s.remove(); if (handed.delete(id)){ asked.delete(id); fail(new Error(`sound/${id}.js`)); } };
-      // (loaded but nothing handed over counts as lost too)
-      s.src = `sound/${id}.js`; s.async = true; s.onload = s.onerror = lost;
-      document.head.append(s);
+/* ---------- the pieces, a part at a time: public/sound/<id><n>.js hands flightSound its bytes, how many parts there are, and how far into
+   the piece the parts up to it reach ---------- */
+type Coming = { bytes: Uint8Array; n: number; of: number; upTo: number; next: Promise<void> | null; since: number; wake: (() => void) | null };
+const coming = new Map<Id, Coming>(), handed = new Map<string, (n: number, of: number, upTo: number, text: string) => void>();
+(window as unknown as { flightSound: (id: Id, n: number, of: number, upTo: number, text: string) => void }).flightSound = (id, n, of, upTo, text) => handed.get(id + n)?.(n, of, upTo, text);
+function comingOf(id: Id){
+  let c = coming.get(id);
+  if (!c) coming.set(id, c = { bytes: new Uint8Array(0), n: 0, of: 1, upTo: 0, next: null, since: 0, wake: null });
+  return c;
+}
+/** Its next part, undone and put after what has come (one part at a time, however many ask). */
+function more(id: Id){
+  const c = comingOf(id);
+  return c.next ??= new Promise<void>((ok, fail) => {
+    const key = id + c.n, s = document.createElement('script');
+    // (loaded but nothing handed over counts as lost too)
+    const lost = () => { s.remove(); if (handed.delete(key)) fail(new Error(`sound/${key}.js`)); };
+    handed.set(key, (n, of, upTo, text) => {
+      handed.delete(key);
+      const bin = atob(text), at = c.bytes.length, b = new Uint8Array(at + bin.length);
+      b.set(c.bytes);
+      for (let i = 0; i < bin.length; i++) b[at + i] = bin.charCodeAt(i);
+      keyed(b.subarray(at), id, at);
+      c.bytes = b; c.n = n + 1; c.of = of; c.upTo = upTo;
+      ok(); c.wake?.();
     });
-    asked.set(id, p);
-  }
-  return p;
+    c.since = performance.now();
+    s.src = `sound/${key}.js`; s.async = true; s.onload = s.onerror = lost;
+    document.head.append(s);
+  }).finally(() => { c.next = null; });
 }
 /** Decoded at 32 kHz, which keeps all the MP3 has of them and takes a third less memory than 48 kHz (a piece is still up to 72 MB);
  *  where an off-line context at that rate is not to be had, at the rate of the one given. */
 let at32: BaseAudioContext | null = null;
-function decode(ctx: BaseAudioContext, data: ArrayBuffer){
+function decode(ctx: BaseAudioContext, bytes: Uint8Array){
   if (!at32){ try { at32 = new OfflineAudioContext(2, 1, 32000); } catch { at32 = ctx; } }
   const c = at32;
-  return new Promise<AudioBuffer>((ok, fail) => { c.decodeAudioData(data.slice(0), ok, fail)?.catch(fail); });
+  return new Promise<AudioBuffer>((ok, fail) => { c.decodeAudioData(bytes.slice().buffer, ok, fail)?.catch(fail); });
 }
 
 function noiseBuffer(ctx: BaseAudioContext, seconds: number){
@@ -104,7 +114,11 @@ function hallBuffer(ctx: BaseAudioContext, seconds: number){
   return b;
 }
 
-type Voice = { kind: Kind; id: Id; src: AudioBufferSourceNode; level: GainNode; out: GainNode; zero: number; end: number; leaving: boolean; gone: number };
+/** A piece decoded, all of it or as far as it has come: upTo is how many seconds of it are good (Infinity: all). */
+type Piece = { buf: AudioBuffer; upTo: number };
+/** A piece sounding: src through g (its own, for where what has come runs out) through level (how loud this kind of it is, and its
+ *  coming in) through out (its going); zero is when its own second 0 would have been, start when it begins to sound. */
+type Voice = { kind: Kind; id: Id; src: AudioBufferSourceNode; g: GainNode; level: GainNode; out: GainNode; zero: number; start: number; end: number; leaving: boolean; gone: number };
 
 class Engine {
   out: GainNode; private dry: GainNode; private wet: GainNode; private music: GainNode;
@@ -113,14 +127,15 @@ class Engine {
   private r = mulberry32(2021);
   private lastU = -1; private gate = 0; private lastThunder = -9; private lastBolt = -1;
   // the music: what is sounding, the pieces decoded, and where things stand
-  private voices: Voice[] = []; private pieces = new Map<Id, AudioBuffer>(); private loading = new Set<Id>(); private missed = new Map<Id, number>();
+  private voices: Voice[] = []; private pieces = new Map<Id, Piece>(); private loading = new Set<Id>(); private missed = new Map<Id, number>();
   private zone: Zone | null = null; private zoneFrom = 0; private spent = false; private restEnded: number | null = null; private heard = false; private rate = 1; private landed: number | null = null;
   /** (test only) what was played */
   log: string[] | null = null;
 
-  /** load: how to get a piece, decoded (null: only the pieces given). */
-  constructor(private ctx: BaseAudioContext, private load: ((id: Id) => Promise<AudioBuffer>) | null, given?: Map<Id, AudioBuffer>){
-    if (given) this.pieces = new Map(given);
+  /** load: how to get a piece, handing over each time more of it has come and been decoded, and done when all of it has (null: only the
+   *  pieces given). */
+  constructor(private ctx: BaseAudioContext, private load: ((id: Id, take: (buf: AudioBuffer, upTo: number) => void) => Promise<void>) | null, given?: Map<Id, AudioBuffer>){
+    if (given) for (const [id, buf] of given) this.pieces.set(id, { buf, upTo: Infinity });
     const limit = ctx.createDynamicsCompressor(); limit.threshold.value = -5; limit.knee.value = 3; limit.ratio.value = 20; limit.attack.value = 0.002; limit.release.value = 0.12; limit.connect(ctx.destination);
     this.out = ctx.createGain(); this.out.gain.value = 0; this.out.connect(limit);
     // the air goes through a compressor of its own and a floor; the music, as it was mastered, only through the limiter
@@ -163,16 +178,45 @@ class Engine {
   }
 
   /* ---------- the music ---------- */
-  /** A piece decoded, or null, and then it is asked for (again after half a minute, if it could not be had). */
+  /** A piece decoded, all of it or as far as it has come, or null; and while not all of it is here it is asked for (again after ten
+   *  seconds, if a part could not be had). */
   private piece(id: Id){
-    const b = this.pieces.get(id);
-    if (b){ this.pieces.delete(id); this.pieces.set(id, b); return b; }
+    const p = this.pieces.get(id);
+    if (p){ this.pieces.delete(id); this.pieces.set(id, p); }
     const missed = this.missed.get(id);
-    if (this.load && !this.loading.has(id) && !(missed !== undefined && this.ctx.currentTime - missed < 30)){
+    if ((!p || p.upTo < Infinity) && this.load && !this.loading.has(id) && !(missed !== undefined && this.ctx.currentTime - missed < 10)){
       this.loading.add(id);
-      this.load(id).then(buf => { this.pieces.set(id, buf); this.missed.delete(id); this.keepTwo(id); }, () => { this.missed.set(id, this.ctx.currentTime); }).finally(() => this.loading.delete(id));
+      this.load(id, (buf, upTo) => this.take(id, buf, upTo)).then(() => { this.missed.delete(id); }, () => { this.missed.set(id, this.ctx.currentTime); }).finally(() => this.loading.delete(id));
     }
-    return null;
+    return p ?? null;
+  }
+  /** More of a piece has come, or all of it: what is sounding from less of it goes over to this where it is. Still within what it had,
+   *  the two are the same sample for sample there, so it goes straight over; past it, where it had gone quiet, it comes back in. */
+  private take(id: Id, buf: AudioBuffer, upTo: number){
+    const old = this.pieces.get(id);
+    if (old && old.upTo >= upTo) return;
+    const p = { buf, upTo };
+    this.pieces.delete(id); this.pieces.set(id, p);
+    for (const v of this.voices){
+      // (from now, or from when it was to begin, if that is still to come)
+      const t = Math.max(this.ctx.currentTime + 0.05, v.start);
+      if (v.id !== id || v.leaving || t >= v.end || t - v.zero > upTo - 2) continue;
+      const straight = !!old && t - v.zero < old.upTo - 0.1;
+      v.src.stop(t); this.feed(v, p, t, straight ? 0 : 1.5);
+      this.log?.push(`${t.toFixed(2)} ${v.kind} goes on with ${upTo < Infinity ? `${upTo.toFixed(0)} s` : 'all'} of it at ${(t - v.zero).toFixed(1)}`);
+    }
+    this.keepTwo(id);
+  }
+  /** Where a kind of it ends: its own end, or the piece's if that comes first (not known until all of it has come). */
+  private top(kind: Kind, p: Piece){ const k = KIND[kind]; return p.upTo < Infinity ? k.to : Math.min(k.to, p.buf.duration); }
+  /** A voice plays this piece from t on, where it is by then; it comes in over fadeIn, and goes quiet where what has come runs out. */
+  private feed(v: Voice, p: Piece, t: number, fadeIn: number){
+    const src = this.ctx.createBufferSource(), g = this.ctx.createGain();
+    src.buffer = p.buf; src.connect(g); g.connect(v.level);
+    if (fadeIn > 0){ g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(1, t + fadeIn); }
+    if (p.upTo < Infinity){ const edge = Math.max(v.zero + p.upTo, t + fadeIn + 0.1); g.gain.setValueAtTime(1, edge - 0.08); g.gain.linearRampToValueAtTime(0, edge); }
+    src.start(t, t - v.zero);
+    v.src = src; v.g = g; v.end = v.zero + this.top(v.kind, p);
   }
   /** No more than two pieces kept decoded (the longest least lately wanted goes first), never one that is sounding, has just come or
    *  was the last wanted. */
@@ -182,10 +226,12 @@ class Engine {
     for (const id of ids) if (this.pieces.size > 2 && id !== fresh && id !== last && !this.voices.some(v => v.id === id)) this.pieces.delete(id);
   }
   private begin(kind: Kind, at: number, when: number, fade: number){
-    const k = KIND[kind], buf = this.pieces.get(k.id)!, ctx = this.ctx, src = ctx.createBufferSource(), level = ctx.createGain(), out = ctx.createGain();
-    src.buffer = buf; level.gain.setValueAtTime(0, when); level.gain.linearRampToValueAtTime(k.gain, when + fade);
-    src.connect(level); level.connect(out); out.connect(this.music); src.start(when, at);
-    this.voices.push({ kind, id: k.id, src, level, out, zero: when - at, end: when - at + Math.min(k.to, buf.duration), leaving: false, gone: Infinity });
+    const k = KIND[kind], p = this.pieces.get(k.id)!, ctx = this.ctx, level = ctx.createGain(), out = ctx.createGain();
+    level.gain.setValueAtTime(0, when); level.gain.linearRampToValueAtTime(k.gain, when + fade);
+    level.connect(out); out.connect(this.music);
+    const v = { kind, id: k.id, level, out, zero: when - at, start: when, end: 0, leaving: false, gone: Infinity } as Voice;
+    this.feed(v, p, when, 0);
+    this.voices.push(v);
     if (kind === 'tale' || kind === 'rain' || kind === 'sun') this.heard = true;
     this.log?.push(`${when.toFixed(2)} ${kind} from ${at.toFixed(1)}`);
   }
@@ -197,7 +243,7 @@ class Engine {
   /** Which music should be sounding where she is, and see that it is. */
   private direct(when: number, u: number){
     const zone = zoneAt(u);
-    if (zone !== this.zone){ this.zone = zone; this.zoneFrom = when; this.spent = false; this.restEnded = null; }
+    if (zone !== this.zone){ this.zone = zone; this.zoneFrom = when; this.spent = false; this.restEnded = null; this.log?.push(`${when.toFixed(2)} into ${zone}`); }
     // a stretch that has come to its end fades of itself
     for (const v of this.voices) if (!v.leaving && when + 0.2 >= v.end - KIND[v.kind].tail){
       this.leave(v, Math.max(when, v.end - KIND[v.kind].tail), KIND[v.kind].tail);
@@ -230,27 +276,31 @@ class Engine {
       if ((want === 'tale' || want === 'rain' || want === 'sun') && Math.abs(now - at) > 20){
         this.leave(voice, when, k.fadeOut);
         if (at > k.to - 8){ this.spent = true; return; }
-        this.begin(want, Math.max(k.from, at), when + 0.05, k.fadeIn);
+        // (if that much of it has not come yet, it starts there once it has)
+        const p = this.pieces.get(k.id);
+        if (p && Math.max(k.from, at) < p.upTo - 4) this.begin(want, Math.max(k.from, at), when + 0.05, k.fadeIn);
         return;
       }
     }
     // (a jump may be one of several: it waits for her to settle)
     if (want === (voice?.kind ?? null) || when - this.zoneFrom < 0.25) return;
     if (!want){ if (voice) this.leave(voice, when, KIND[voice.kind].fadeOut); return; }
-    const k = KIND[want], buf = this.piece(k.id);
+    const k = KIND[want], p = this.piece(k.id);
     // (not here yet: what is sounding goes on until it is)
-    if (!buf) return;
-    const at = Math.max(k.from, Math.min(placeOf(want, u, this.rate), Math.min(k.to, buf.duration) - 8));
+    if (!p) return;
+    const top = this.top(want, p), at = Math.max(k.from, Math.min(placeOf(want, u, this.rate), top - 8));
     // the same piece near enough the same place goes on as it is, under its new name
     if (voice && voice.id === k.id){
       const now = when - voice.zero;
       if (Math.abs(now - at) < 15 && now >= k.from && now < k.to - 8){
-        voice.kind = want; voice.end = voice.zero + Math.min(k.to, buf.duration); voice.level.gain.setTargetAtTime(k.gain, when, 0.5);
+        voice.kind = want; voice.end = voice.zero + top; voice.level.gain.setTargetAtTime(k.gain, when, 0.5);
         if (want === 'tale' || want === 'rain' || want === 'sun') this.heard = true;
         this.log?.push(`${when.toFixed(2)} goes on as ${want} at ${now.toFixed(1)}`);
         return;
       }
     }
+    // (only the start of it has come, not as far as this: what is sounding goes on until it has)
+    if (at > p.upTo - 4) return;
     const fresh = k.from === 0 && at < 0.5;
     if (voice) this.leave(voice, when, KIND[voice.kind].fadeOut);
     // (a piece from its own beginning comes in out of the quiet, once the last has mostly gone)
@@ -259,7 +309,7 @@ class Engine {
   /** (for the console: __dbg.sound) */
   state(){
     const t = this.ctx.currentTime;
-    return { zone: this.zone, rate: +this.rate.toFixed(2), decoded: [...this.pieces.keys()], voices: this.voices.map(v => `${v.kind} ${(t - v.zero).toFixed(1)}${v.leaving ? ' going' : ''}`) };
+    return { zone: this.zone, rate: +this.rate.toFixed(2), decoded: [...this.pieces].map(([id, p]) => p.upTo < Infinity ? `${id} to ${p.upTo.toFixed(0)} s` : id), voices: this.voices.map(v => `${v.kind} ${(t - v.zero).toFixed(1)}${v.leaving ? ' going' : ''}`) };
   }
 
   /** Every so often: bring it all to where she is. */
@@ -307,12 +357,35 @@ export const soundState = () => engine?.state() ?? null;
 const session = () => (navigator as unknown as { audioSession?: { type: string } }).audioSession;
 const SHOW = new URLSearchParams(location.search).has('sound'), news = new Map<Id, string>();
 const told = (id: Id, what: string) => { if (SHOW) news.set(id, what); };
-/** A piece fetched and decoded (with ?sound, how far it got). */
-function fetchPiece(c: BaseAudioContext, id: Id){
-  told(id, 'fetching');
-  return bytesOf(id).then(b => { told(id, `decoding ${(b.byteLength/1e6).toFixed(1)} MB`); return decode(c, b); }).then(
-    buf => { told(id, `decoded, ${buf.duration.toFixed(0)} s at ${buf.sampleRate} Hz`); return buf; },
-    (e: unknown) => { told(id, `failed: ${e instanceof Error ? `${e.name} ${e.message}` : String(e)}`); throw e; });
+const why = (e: unknown) => e instanceof Error ? `${e.name} ${e.message}` : String(e);
+/** The piece last asked for, and those whose parts are still being fetched. */
+let lead: Id | null = null;
+const fetching = new Set<Id>();
+/** A piece as it comes: its parts come one after another, and meanwhile what has come is decoded, the latest of it each time, and handed
+ *  to take with how many seconds of it are good; done once all of it has been (with ?sound, how far it got). */
+async function fetchPiece(c: BaseAudioContext, id: Id, take: (buf: AudioBuffer, upTo: number) => void){
+  const p = comingOf(id);
+  let done = false, lost: unknown = null;
+  lead = id; fetching.add(id);
+  void (async () => {
+    while (p.n < p.of){
+      // (on a slow line one piece at a time: the one last asked for comes first, and the others wait between their parts)
+      for (let l = lead; l !== id && l && fetching.has(l); l = lead) await new Promise(r => setTimeout(r, 400));
+      await more(id);
+    }
+  })().catch(e => { lost = e; told(id, `failed: ${why(e)}`); }).finally(() => { done = true; fetching.delete(id); p.wake?.(); });
+  for (let shown = 0;;){
+    if (p.n > shown){
+      const n = p.n, whole = n >= p.of, upTo = whole ? Infinity : p.upTo - 1;
+      try { take(await decode(c, p.bytes), upTo); }
+      catch (e){ told(id, `failed: ${why(e)}`); throw e; }
+      shown = n;
+      told(id, whole ? 'all here' : `${n}/${p.of} here`);
+      if (whole) return;
+    }
+    else if (done) throw lost ?? new Error(`sound/${id}`);
+    else await new Promise<void>(ok => { p.wake = () => { p.wake = null; ok(); }; });
+  }
 }
 function wake(){
   if (!want) return;
@@ -322,7 +395,8 @@ function wake(){
     const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AC) return;
     const c = new AC({ latencyHint: 'playback' });
-    ctx = c; engine = new Engine(c, id => fetchPiece(c, id));
+    ctx = c; engine = new Engine(c, (id, take) => fetchPiece(c, id, take));
+    if (SHOW) engine.log = [];
   }
   // (stopped by the page, or on an iPhone 'interrupted', by a call or by another app taking the sound)
   if (ctx.state !== 'running' && ctx.state !== 'closed') void ctx.resume();
@@ -351,8 +425,14 @@ if (SHOW){
   setInterval(() => {
     const t = engine?.state(), lines = [`sound ${want ? 'on' : 'off'}, session ${session()?.type ?? 'none'}`,
       ctx ? `context ${ctx.state}, ${ctx.sampleRate} Hz, ${ctx.currentTime.toFixed(1)} s` : 'no context yet: touch the page'];
-    for (const id of ['a', 'b', 'c'] as Id[]) lines.push(`${id} ${news.get(id) ?? '-'}`);
-    if (t) lines.push(`${t.zone}, x${t.rate}, decoded ${t.decoded.join(' ') || '-'}`, `playing ${t.voices.join(', ') || '-'}`);
+    for (const id of ['a', 'b', 'c'] as Id[]){
+      const p = coming.get(id);
+      lines.push(`${id} ${p ? `${(p.bytes.length/1e6).toFixed(2)} MB${p.next ? `, part ${p.n + 1}/${p.n ? p.of : '?'} coming ${((performance.now() - p.since)/1000).toFixed(0)} s` : ''}` : '-'}${news.has(id) ? `, ${news.get(id)}` : ''}`);
+    }
+    if (t) lines.push(`${t.zone}, x${t.rate}, decoded ${t.decoded.join(', ') || '-'}`, `playing ${t.voices.join(', ') || '-'}`);
+    // (and the last few things the music did)
+    const log = engine?.log;
+    if (log){ log.splice(0, log.length - 5); lines.push(...log); }
     pre.textContent = lines.join('\n');
   }, 500);
 }
@@ -360,7 +440,7 @@ if (SHOW){
 /* ---------- (test only, dev/film.mjs: the same sound for a stretch of flight at the usual pace, rendered off line, as 16-bit stereo WAV in base64; a low rate for a long stretch, to follow what the music does) ---------- */
 if (window.__frameByFrame) window.__renderSound = async (from: number, seconds: number, rate = 44100) => {
   const off = new OfflineAudioContext(2, Math.ceil(rate*seconds), rate), given = new Map<Id, AudioBuffer>();
-  for (const id of ['a', 'b', 'c'] as Id[]){ try { given.set(id, await decode(off, await bytesOf(id))); } catch { /* without that piece */ } }
+  for (const id of ['a', 'b', 'c'] as Id[]){ try { const p = comingOf(id); while (p.n < p.of) await more(id); given.set(id, await decode(off, p.bytes)); } catch { /* without that piece */ } }
   const e = new Engine(off, null, given);
   e.log = [`pieces ${[...given.keys()].join(' ')}`];
   let u = from;

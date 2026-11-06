@@ -35,7 +35,7 @@ Windows 上第一次构建要编译全部 Rust 依赖，约需 10 到 20 分钟�
 
 ## 发布内容
 
-网站上线 `dist/index.html` 和 `dist/sound/`。脚本、样式、着色器、three.js 和字体都打包在 `index.html` 里，不依赖外部资源。配乐是 `public/sound/` 里的三个脚本：OpenTracks 的三首曲子套上密钥流（`src/key.ts`），页面在内存里解开播放。OpenTracks 不许让人用普通操作拿到音频文件，所以哪里都不放音频文件。Vite 把它们原样复制到 `dist/sound/`，页面碰过以后才去取；离线包把它和 `index.html` 一起打进去（`deploy.yml` 里「打包离线版」那一行），桌面版也带着。文档和 Python 脚本不进入网站。
+网站上线 `dist/index.html` 和 `dist/sound/`。脚本、样式、着色器、three.js 和字体都打包在 `index.html` 里，不依赖外部资源。配乐是 `public/sound/` 里的脚本：OpenTracks 的三首曲子套上密钥流（`src/key.ts`），每首切成几段，页面在内存里解开播放，第一段到了就开始放。OpenTracks 不许让人用普通操作拿到音频文件，所以哪里都不放音频文件。Vite 把它们原样复制到 `dist/sound/`，页面碰过以后才去取；离线包把它和 `index.html` 一起打进去（`deploy.yml` 里「打包离线版」那一行），桌面版也带着。文档和 Python 脚本不进入网站。
 
 Release「offline」里的文件名固定，下载地址是 `https://github.com/HANE-LAB/HANE-FLIGHT/releases/download/offline/<文件名>`：
 

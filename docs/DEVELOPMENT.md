@@ -55,7 +55,7 @@ npm run tauri build    # 免安装 exe 在 src-tauri/target/release/，安装包
 
 ## 调试
 
-地址参数：`d=天` 或 `from=YYYY-MM-DD` 从哪天开始，`film` 电影模式，`pause` 暂停，`speed=` 速度，`view=0|1|2` 视角（跟随、仰望、远望），`noui` 不要界面，`writing=0` 关掉门柱上的字。
+地址参数：`d=天` 或 `from=YYYY-MM-DD` 从哪天开始，`film` 电影模式，`pause` 暂停，`speed=` 速度，`view=0|1|2` 视角（跟随、仰望、远望），`noui` 不要界面，`writing=0` 关掉门柱上的字，`sound` 在右上角显示声音的状态（手机上没有控制台时用）。
 
 控制台：`flight.seek('2022-10-12')`、`flight.play(false)`、`flight.speed(2)`、`flight.view(2)`、`flight.state()`；`__dbg` 上有场景、相机、`seq`、天气 `W` 和正在放的配乐 `sound`。
 

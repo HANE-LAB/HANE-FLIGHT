@@ -19,7 +19,9 @@ import { keyed } from './key';
    the storm and in a lightning asked for it draws back.
    The pieces are not files anyone can take, as OpenTracks asks: each is a script in public/sound/ holding its bytes under a key stream
    (src/key.ts, dev/music.mjs), undone here in memory and played through Web Audio. Nothing loads and nothing starts until the viewer has
-   touched the page with the sound on, as browsers ask.
+   touched the page with the sound on, as browsers ask. An iPhone silences what a page plays this way with the switch on its side, as it
+   does a ringtone, unless the page says it is playing, as a video does: so it says so.
+   ?sound writes on the page how the sound stands, for a phone, which has no console.
    ===================================================================== */
 type Id = 'a' | 'b' | 'c';
 type Kind = 'tale' | 'rain' | 'sun' | 'end' | 'again';
@@ -301,15 +303,29 @@ let ctx: AudioContext | null = null, engine: Engine | null = null, step = 0;
 export const soundOn = () => want;
 /** (for the console) */
 export const soundState = () => engine?.state() ?? null;
+/** (Safari 16.4 on: 'playback' is what a video is, which the switch on an iPhone's side does not silence) */
+const session = () => (navigator as unknown as { audioSession?: { type: string } }).audioSession;
+const SHOW = new URLSearchParams(location.search).has('sound'), news = new Map<Id, string>();
+const told = (id: Id, what: string) => { if (SHOW) news.set(id, what); };
+/** A piece fetched and decoded (with ?sound, how far it got). */
+function fetchPiece(c: BaseAudioContext, id: Id){
+  told(id, 'fetching');
+  return bytesOf(id).then(b => { told(id, `decoding ${(b.byteLength/1e6).toFixed(1)} MB`); return decode(c, b); }).then(
+    buf => { told(id, `decoded, ${buf.duration.toFixed(0)} s at ${buf.sampleRate} Hz`); return buf; },
+    (e: unknown) => { told(id, `failed: ${e instanceof Error ? `${e.name} ${e.message}` : String(e)}`); throw e; });
+}
 function wake(){
   if (!want) return;
+  const s = session();
+  if (s && s.type !== 'playback') try { s.type = 'playback'; } catch { /* left as it was */ }
   if (!ctx){
     const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AC) return;
     const c = new AC({ latencyHint: 'playback' });
-    ctx = c; engine = new Engine(c, id => bytesOf(id).then(b => decode(c, b)));
+    ctx = c; engine = new Engine(c, id => fetchPiece(c, id));
   }
-  if (ctx.state === 'suspended') void ctx.resume();
+  // (stopped by the page, or on an iPhone 'interrupted', by a call or by another app taking the sound)
+  if (ctx.state !== 'running' && ctx.state !== 'closed') void ctx.resume();
 }
 export function setSound(on: boolean){
   want = on;
@@ -326,6 +342,19 @@ export function updateSound(u: number, dt: number){
   step += dt; if (step < 0.1) return;
   engine.tick(ctx.currentTime + 0.03, u, step, seq.playing && u < REST - 0.01, seq.film, LEVEL);
   step = 0;
+}
+// (?sound: how it stands, twice a second, in the top corner away from the date)
+if (SHOW){
+  const pre = document.createElement('pre');
+  pre.style.cssText = 'position:fixed;right:6px;top:max(6px,env(safe-area-inset-top));z-index:9;margin:0;padding:6px 8px;font:12px/1.5 ui-monospace,Menlo,monospace;color:#fff;background:#000b;pointer-events:none;white-space:pre-wrap;max-width:calc(100vw - 12px)';
+  document.body.append(pre);
+  setInterval(() => {
+    const t = engine?.state(), lines = [`sound ${want ? 'on' : 'off'}, session ${session()?.type ?? 'none'}`,
+      ctx ? `context ${ctx.state}, ${ctx.sampleRate} Hz, ${ctx.currentTime.toFixed(1)} s` : 'no context yet: touch the page'];
+    for (const id of ['a', 'b', 'c'] as Id[]) lines.push(`${id} ${news.get(id) ?? '-'}`);
+    if (t) lines.push(`${t.zone}, x${t.rate}, decoded ${t.decoded.join(' ') || '-'}`, `playing ${t.voices.join(', ') || '-'}`);
+    pre.textContent = lines.join('\n');
+  }, 500);
 }
 
 /* ---------- (test only, dev/film.mjs: the same sound for a stretch of flight at the usual pace, rendered off line, as 16-bit stereo WAV in base64; a low rate for a long stretch, to follow what the music does) ---------- */

@@ -1,0 +1,130 @@
+name: 发布 HANE Flight
+
+on:
+  workflow_dispatch:
+    inputs:
+      site_only:
+        description: 只重建网站，不重建桌面版和 Release（每日数据更新用）
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths: ["index.html", "src/**", "public/**", "data/flight.json", "data/writing.json", "src-tauri/**", "package.json", "package-lock.json", "vite.config.ts", "tsconfig.json", ".github/workflows/**"]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      pages: ${{ steps.pages.outputs.enabled }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: 类型检查并构建单文件页面
+        # 只发布 dist/index.html；文档、开发文件和数据合成脚本不上线
+        run: |
+          npm ci
+          npm run build
+      - name: 打包离线版
+        # (sound/: the music, which the page loads beside itself)
+        run: cd dist && zip -q -r ../HANE-Flight-offline.zip index.html sound
+      - uses: actions/upload-artifact@v4
+        with:
+          name: offline
+          path: HANE-Flight-offline.zip
+          retention-days: 1
+      - name: 看 Pages 是否已开启
+        # 没开 Pages 就不发网站，离线版和桌面版照常发到 Release
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${{ github.repository }}/pages" >/dev/null 2>&1; then echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else echo "enabled=false" >> "$GITHUB_OUTPUT"; echo "::notice::Pages 没有开启，这次不发布网站"; fi
+      - if: steps.pages.outputs.enabled == 'true'
+        uses: actions/configure-pages@v5
+      - if: steps.pages.outputs.enabled == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+  deploy:
+    needs: build
+    if: needs.build.outputs.pages == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
+  desktop:
+    # Tauri 把同一个 dist/index.html 装进 WebView2 窗口；GitHub 的 Windows 机器已装好 Rust
+    if: ${{ !inputs.site_only }}
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: tauri-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+      - name: 构建 exe 和安装包
+        run: |
+          npm ci
+          npm run tauri build
+      - name: 换成固定的文件名
+        shell: bash
+        run: |
+          mkdir out
+          cp src-tauri/target/release/hane-flight.exe out/HANE-Flight.exe
+          cp src-tauri/target/release/bundle/nsis/*-setup.exe out/HANE-Flight-setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop
+          path: out
+          retention-days: 1
+  release:
+    # 离线版和桌面版挂在 Release「offline」上，下载地址固定：.../releases/download/offline/<文件名>
+    needs: [build, desktop]
+    if: ${{ !inputs.site_only }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+      - name: 更新 Release 里的三个文件
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cat > notes.md <<'EOF'
+          三个文件都随网站自动更新，下载地址不变。
+
+          - HANE-Flight-setup.exe：Windows 安装版，装在当前用户下，不需要管理员权限，开始菜单里有快捷方式。
+          - HANE-Flight.exe：Windows 免安装版，双击运行。需要 Microsoft Edge WebView2，Windows 11 已自带。
+          - HANE-Flight-offline.zip：网页离线版，解压后用 Chrome 或 Edge 打开 index.html。
+
+          exe 没有代码签名，Windows 可能提示「Windows 已保护你的电脑」：点「更多信息」，再点「仍要运行」。
+          EOF
+          if gh release view offline >/dev/null 2>&1; then gh release edit offline --notes-file notes.md
+          else gh release create offline --title "离线版与桌面版（随网站自动更新）" --notes-file notes.md; fi
+          gh release upload offline offline/HANE-Flight-offline.zip desktop/HANE-Flight.exe desktop/HANE-Flight-setup.exe --clobber

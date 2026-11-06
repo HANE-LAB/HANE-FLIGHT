@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>HANE Flight</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%2304060d'/><path d='M4 52q10-12 22-6q8-12 20-4q10 0 14 10z' fill='%23233058'/><g fill='%23d4553a'><rect x='20' y='20' width='24' height='3.5'/><rect x='23' y='23' width='4' height='24'/><rect x='37' y='23' width='4' height='24'/><rect x='22' y='29' width='20' height='2.5'/></g><circle cx='32' cy='36' r='3' fill='%23ffc466'/></svg>">
+<link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+<!-- 大鸟的物理：KawaiiPhysics，MIT License，Copyright (c) 2019-2026 pafuhana1213，https://github.com/pafuhana1213/KawaiiPhysics -->
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="magatama" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M14.3 2.2a8 8 0 0 1 3.1 15.4c-2.8 1.2-5.5 2.2-8 4.2-.6.4-1.3.1-1.2-.6.4-2.5 1.3-4.5 1.2-6.9a8 8 0 0 1 4.9-12.1zM14.2 7.2a2.2 2.2 0 1 0 .01 0z"/></symbol>
+</svg>
+
+<div id="stage">
+  <canvas id="stage-canvas" aria-label="火羽鸟飞在云海里，一座座鸟居从云中立起来，门柱上写着那一夜观众说的话，她从门中穿过"></canvas>
+
+  <div id="ui">
+    <!-- 左边是她：这一夜，和她的鸣。右边是应 -->
+    <div class="left" id="left">
+      <div class="slip" id="slip" aria-label="这一夜">
+        <span class="slip-y" id="dateY"></span>
+        <span class="slip-d" id="dateD"></span>
+        <span class="slip-n" id="nth"></span>
+      </div>
+      <div class="hang">
+        <div class="plate call" id="call" hidden><b>鸣</b><span id="callText" lang="ja"></span></div>
+        <div class="plate slip-t" id="tally"></div>
+      </div>
+    </div>
+
+    <section class="voices" id="voices" aria-label="这一夜的话">
+      <div class="said" id="said"></div>
+    </section>
+
+    <button id="skip" type="button" class="word" hidden><span>回到今天</span></button>
+
+    <footer class="belt" id="belt">
+      <button id="play" type="button" class="mirror" aria-pressed="true"><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="23" class="m-rim"/><circle cx="24" cy="24" r="19.5" class="m-rim thin"/><path id="lobes" class="m-lobe"/></svg><span id="playText">停</span></button>
+      <button id="speed" type="button" class="word" title="快慢"><span id="speedText">常飞</span></button>
+      <div class="cord" id="cordWrap">
+        <canvas id="cord"></canvas>
+        <i id="mark"></i>
+        <input id="timeline" type="range" min="0" max="1" value="0" step="1" aria-label="一座座门，一夜夜">
+      </div>
+      <button id="seekBtn" type="button" class="word" aria-expanded="false" aria-controls="seek"><span>寻声</span></button>
+      <button id="sound" type="button" class="word small" aria-pressed="false" title="声音"><span>声</span></button>
+      <button id="motion" type="button" class="word small" aria-pressed="false" title="减少动态"><span>静</span></button>
+    </footer>
+  </div>
+
+  <div class="dock">
+    <div class="reading" id="reading" hidden>
+      <button id="read" type="button" class="word"><span>近看门柱</span></button>
+      <button id="face" type="button" class="word" hidden><span>绕到柱后</span></button>
+      <button id="strike" type="button" class="word" aria-pressed="false" hidden><span>借一道闪电</span></button>
+    </div>
+
+    <section class="seek" id="seek" hidden aria-label="寻声">
+      <div class="souls" id="souls"></div>
+      <div class="seek-go" id="seekGo" hidden>
+        <button id="seekPrev" type="button" class="word"><span>前夜</span></button>
+        <span class="seek-at" id="seekAt"></span>
+        <button id="seekNext" type="button" class="word"><span>后夜</span></button>
+      </div>
+    </section>
+
+    <div id="today" hidden>
+      <div class="today-hint" id="todayHint">拖动转动视角 · 滚轮或双指拉近</div>
+      <div class="today-go">
+        <button id="fromStart" type="button" class="word big on"><span>从头飞起</span></button>
+        <button id="toFilm" type="button" class="word big"><span>电影模式</span></button>
+        <button id="toToday" type="button" class="word big on" hidden><span>回到今天</span></button>
+      </div>
+    </div>
+  </div>
+  <div id="veil"></div>
+
+  <p id="nogl" hidden>这个浏览器没有 WebGL，页面画不出来。请换 Chrome 或 Edge。</p>
+</div>
+
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

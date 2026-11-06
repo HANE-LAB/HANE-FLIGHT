@@ -1,0 +1,20 @@
+# 本机环境
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# 只留在本机的密钥和个人设置
+config.local.toml
+CLAUDE.local.md
+
+# 前端依赖和构建结果
+node_modules/
+dist/
+
+# 本机下载的原始数据和截图输出
+data/raw/
+dev/.sandbox/
+
+# Blender 自动留的备份
+*.blend1

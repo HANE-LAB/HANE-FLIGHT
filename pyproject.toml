@@ -1,0 +1,6 @@
+[project]
+name = "hane-flight"
+version = "0.1.0"
+description = "HANE Flight：数据合成（只用标准库）"
+requires-python = ">=3.11"
+dependencies = []

@@ -1,0 +1,44 @@
+name: 每日更新数据
+
+# 每天日本时间 04:30（UTC 19:30），也就是 Voyage 03:00 抓完大航海名单、她当晚也播完之后：在线取 Danmakus 的直播统计和
+# HANE Voyage 公开的日表，合成 data/flight.json，有变化就提交到 main，再重建网站、离线版和桌面版。只在 HANE-LAB/HANE-FLIGHT
+# 上运行，fork 不会每天去取。不用登录，也不放任何凭据。Voyage 取不到或合成失败时不提交，网站保留前一天的数据；只是直播统计
+# 取不到时舰长数照常更新，门等它恢复，任务页上会有一条警告。
+on:
+  schedule:
+    - cron: "30 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.repository == 'HANE-LAB/HANE-FLIGHT'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 在线取数据并合成
+        run: python -X utf8 -m flight update
+      - name: 提交数据并重建网站
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add data/flight.json
+          if git diff --cached --quiet; then echo "数据没有变化"; exit 0; fi
+          git commit -m "data: $(TZ=Asia/Tokyo date +%F) 的数据"
+          git pull --rebase origin main
+          git push origin HEAD:main
+          # 用 GITHUB_TOKEN 推送不会触发别的工作流，所以直接触发建站
+          gh workflow run deploy.yml --ref main

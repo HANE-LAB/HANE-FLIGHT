@@ -1,14 +1,14 @@
 # 部署
 
-[文档目录](README.md) · [开发指南](DEVELOPMENT.md)
+[返回首页](../README.md) · [开发指南](DEVELOPMENT.md)
 
-和 HANE Voyage 一样发三样东西：网站（GitHub Pages）、网页离线版、Windows 桌面版（Tauri 打的 exe）。三样都来自同一个 `dist/`：单文件的 `index.html`，加上旁边放配乐的 `sound/`。
+发三样东西：网站（GitHub Pages）、网页离线版、Windows 桌面版（Tauri 打的 exe）。都来自同一个 `dist/`：单文件的 `index.html`，加上旁边放配乐的 `sound/`。
 
 ## 仓库
 
-代码在 GitHub 的公开仓库 [HANE-LAB/HANE-FLIGHT](https://github.com/HANE-LAB/HANE-FLIGHT)，默认分支 `main`。`.gitattributes` 把所有文本文件统一成 LF：Git for Windows 默认 `core.autocrlf=true`，没有它检出时会改成 CRLF。
-
-网站：<https://hane-lab.github.io/HANE-FLIGHT/>。Pages 的来源是 GitHub Actions。工作流会先看 Pages 有没有开：开着就发布网站；在 Settings → Pages 里关掉以后，只构建并发布 Release，不再发网站。网站路径由仓库名决定；页面里没有写死的绝对路径，换仓库名或 fork 以后不用改代码。
+- 代码：[HANE-LAB/HANE-FLIGHT](https://github.com/HANE-LAB/HANE-FLIGHT)，默认分支 `main`。`.gitattributes` 把文本文件统一成 LF（Git for Windows 默认会改成 CRLF）。
+- 网站：<https://hane-lab.github.io/HANE-FLIGHT/>，Pages 的来源是 GitHub Actions。Pages 关掉时只构建并发布 Release。
+- 页面里没有写死的绝对路径，换仓库名或 fork 不用改代码。
 
 ## 工作流与触发条件
 
@@ -29,13 +29,15 @@ Windows 上第一次构建要编译全部 Rust 依赖，约需 10 到 20 分钟�
 
 ## 数据
 
-和 Voyage 一样每天自动更新：`update-data.yml` 在日本时间 04:30 从公开来源取数据、合成 `data/flight.json`，有变化就提交到 `main`，再把网站、离线版和桌面版一起重建，详情见[数据](DATA.md#每日自动更新)。工作流只在 `HANE-LAB/HANE-FLIGHT` 上运行，fork 不会每天去取数据。
-
-用 `GITHUB_TOKEN` 推送不会触发别的工作流，所以数据提交本身不会启动 `deploy.yml`，由 `update-data.yml` 用 `gh workflow run` 显式触发。
+- `update-data.yml` 每天日本时间 04:30 从公开来源取数据、合成 `data/flight.json`，有变化就提交到 `main`，再重建网站、离线版和桌面版，详情见[每日自动更新](DATA.md#每日自动更新)。
+- 只在 `HANE-LAB/HANE-FLIGHT` 上运行，fork 不会每天去取数据。
+- 用 `GITHUB_TOKEN` 推送不会触发别的工作流，所以由 `update-data.yml` 用 `gh workflow run` 显式触发 `deploy.yml`。
 
 ## 发布内容
 
-网站上线 `dist/index.html` 和 `dist/sound/`。脚本、样式、着色器、three.js 和字体都打包在 `index.html` 里，不依赖外部资源。配乐是 `public/sound/` 里的脚本：OpenTracks 的三首曲子套上密钥流（`src/key.ts`），每首切成几段，页面在内存里解开播放，第一段到了就开始放。OpenTracks 不许让人用普通操作拿到音频文件，所以哪里都不放音频文件。Vite 把它们原样复制到 `dist/sound/`，页面碰过以后才去取；离线包把它和 `index.html` 一起打进去（`deploy.yml` 里「打包离线版」那一行），桌面版也带着。文档和 Python 脚本不进入网站。
+- 网站上线 `dist/index.html` 和 `dist/sound/`。脚本、样式、着色器、three.js 和字体都在 `index.html` 里，不依赖外部资源；文档和 Python 脚本不进网站。
+- 配乐在 `public/sound/`：OpenTracks 的三首套上密钥流（`src/key.ts`），每首切成几段，页面在内存里解开播放，第一段到了就开始放。OpenTracks 不许让人用普通操作拿到音频文件，所以哪里都不放音频文件。
+- Vite 把它们原样复制到 `dist/sound/`，页面碰过以后才去取；离线包和桌面版也带着。
 
 Release「offline」里的文件名固定，下载地址是 `https://github.com/HANE-LAB/HANE-FLIGHT/releases/download/offline/<文件名>`：
 

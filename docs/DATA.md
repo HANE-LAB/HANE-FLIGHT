@@ -1,6 +1,6 @@
 # 数据
 
-[文档目录](README.md)
+[返回首页](../README.md)
 
 页面读两份数据，都在构建时导入：`data/flight.json` 每天自动更新，`data/writing.json` 是门柱上的字。
 
@@ -29,7 +29,8 @@
 }
 ```
 
-每座门是 `nights` 里的一夜或 `ghosts` 里的一天，按日期排好后按气候挑（`src/data.ts` 的 `SLOTS`）：大事的夜和情绪突出的夜都留，其余每隔几天留弹幕最多的那一夜（`src/climate.ts` 的 `everyOf`）。`total` 决定她身边有多少只小鸟、云谷多宽，以及太阳在哪一夜升起（人数涨得最多的那一夜，`src/data.ts` 的 `JUMP`）。
+- 每座门是 `nights` 里的一夜或 `ghosts` 里的一天，按日期排好后按气候挑（`src/data.ts` 的 `SLOTS`）：大事的夜和情绪突出的夜都留，其余每隔几天留弹幕最多的那一夜（`src/climate.ts` 的 `everyOf`）。
+- `total` 决定她身边有多少只小鸟、云谷多宽，以及太阳在哪一夜升起：人数涨得最多的那一夜（`src/data.ts` 的 `JUMP`）。
 
 ## data/writing.json
 

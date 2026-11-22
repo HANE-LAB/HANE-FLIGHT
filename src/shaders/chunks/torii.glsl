@@ -7,11 +7,17 @@ attribute vec4 iA; attribute vec4 iB; attribute vec2 iC; attribute vec3 iG;
 bool plainWood(){ return iB.z < 0.5; }
 // the gilt, the rope and the paper are in the one vermilion mesh, for the big nights only
 bool toriiWears(float part){ return iB.z > 1.5 || plainWood() || !(abs(part - 9.0) < 0.5 || abs(part - 11.0) < 0.5 || abs(part - 12.0) < 0.5); }
-vec3 toriiPlace(vec3 p){
+// A point of the gate (gate units) turned to its yaw and scaled to its height: metres from its foot
+vec3 toriiOffset(vec3 p){
   float c = cos(iA.w), s = sin(iA.w);
   vec3 q = p*iB.x;
-  return iA.xyz + vec3(c, 0.0, s)*q.x + vec3(0.0, q.y, 0.0) + vec3(-s, 0.0, c)*q.z;   // x across the line, z along it
+  return vec3(c, 0.0, s)*q.x + vec3(0.0, q.y, 0.0) + vec3(-s, 0.0, c)*q.z;   // x across the line, z along it
 }
+// Where the lens sees a point of the gate, from its offset. The feet stand up to 25 km out along the line, where float32 holds a position
+// only to 2 mm, and the view matrix would cancel two such numbers: the parts of a gate would shake against each other by millimetres from
+// frame to frame, and the lacquer under the gilt (a few centimetres in) would flicker through it. Taken from the lens first (the foot and the
+// lens are near each other, so the difference is exact), what is left is small numbers
+vec4 toriiClip(vec3 off){ return projectionMatrix*vec4(mat3(viewMatrix)*((iA.xyz - cameraPosition) + off), 1.0); }
 // A lantern on its cord, in gate units, swung about the cord's top under the tie beam: across the line by the wind, at a pendulum's own rate, sqrt(g/L), L the cord in metres; and by her, as she goes under
 vec3 lanternSwing(vec3 p, float t, float wind){
   float om = sqrt(9.8/(0.14*iB.x)), across = wind*0.26*(sin(t*om + iB.w*2.7) + 0.35*sin(t*om*2.3 + iB.w)) + iG.y, along = iG.x;

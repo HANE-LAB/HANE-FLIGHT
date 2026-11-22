@@ -71,7 +71,7 @@ const bind = (set: DrawSet, g: THREE.InstancedBufferGeometry) => { g.setAttribut
   const mat = new THREE.ShaderMaterial({ uniforms: { ...sceneUniforms(), tDates: { value: plaqueTex }, tInk: { value: inkTex }, tCells: { value: cellsTex }, uInkMean: { value: inkAverage() }, uLent: U.uLent }, defines: { WRITING: WRITING ? 1 : 0, INK_GX: INK_GX.toFixed(1), INK_GY: INK_GY.toFixed(1), CELLS_W: CELLS_WIDTH }, vertexColors: true, alphaToCoverage: true, vertexShader: toriiVert, fragmentShader: toriiFrag });
   const lineMat = new THREE.ShaderMaterial({ uniforms: { ...sceneUniforms(), uLineW: { value: 2.0 } }, side: THREE.BackSide, alphaToCoverage: true, vertexShader: toriiLinesVert, fragmentShader: toriiLinesFrag });
   const instanced = (base: THREE.BufferGeometry, keys: string[]) => { const g = new THREE.InstancedBufferGeometry(); for (const k of keys) g.setAttribute(k, base.getAttribute(k)); return g; };
-  const KEYS = ['position', 'normal', 'color', 'aPart'];
+  const KEYS = ['position', 'normal', 'color', 'aPart', 'aRest'];
   const add = (set: DrawSet, base: THREE.BufferGeometry) => { const m = new THREE.Mesh(bind(set, instanced(base, KEYS)), mat); m.frustumCulled = false; scene.add(m); return m; };
   const red = buildRedTorii(), wood = buildWoodTorii();
   add(NEAR_R, red); add(NEAR_W, wood); add(FAR_R, buildFarRed()); add(FAR_W, buildFarWood());

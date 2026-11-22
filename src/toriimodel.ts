@@ -43,12 +43,15 @@ const dot = (a: V3, b: V3) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
 const norm = (a: V3): V3 => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
 
 class Model {
-  P: number[] = []; N: number[] = []; C: number[] = []; A: number[] = [];
+  P: number[] = []; N: number[] = []; C: number[] = []; A: number[] = []; R: number[] = [];
+  /** Where each point waits (aRest): where it is, but for the snow, which waits gathered inside its beam (snowCap) */
+  rest: ((p: V3) => V3) | null = null;
   /** A triangle, wound to face the way its normals say. */
   tri(a: V3, b: V3, c: V3, na: V3, nb: V3, nc: V3, col: V3, part: number){
     const out = dot(cross(sub(b, a), sub(c, a)), [na[0] + nb[0] + nc[0], na[1] + nb[1] + nc[1], na[2] + nb[2] + nc[2]]) >= 0;
     const [p, q, np, nq] = out ? [b, c, nb, nc] : [c, b, nc, nb];
     this.P.push(...a, ...p, ...q); this.N.push(...na, ...np, ...nq);
+    for (const v of [a, p, q]) this.R.push(...(this.rest ? this.rest(v) : v));
     for (let i = 0; i < 3; i++){ this.C.push(...col); this.A.push(part); }
   }
   quad(a: V3, b: V3, c: V3, d: V3, na: V3, nb: V3, nc: V3, nd: V3, col: V3, part: number){ this.tri(a, b, c, na, nb, nc, col, part); this.tri(a, c, d, na, nc, nd, col, part); }
@@ -73,21 +76,22 @@ class Model {
   prism(p0: V3, p1: V3, U: V3, V: V3, sec: number[][], col: V3, part: number | ((i: number) => number)){
     this.sweep([p0, p1], U, V, sec, col, part);
   }
-  /** The same along a path of points. shift(i, v) moves a section's point along the path's first axis (a slanted cut). */
-  sweep(path: V3[], U: V3, V: V3, sec: number[][], col: V3, part: number | ((i: number) => number), wide?: (k: number) => number, shift?: (k: number, u: number, v: number) => number, colOf?: (i: number) => V3){
-    const n = sec.length, along = norm(sub(path[path.length - 1], path[0]));
+  /** The same along a path of points. shift(k, u, v, i) moves a section's point along axis, by default the way the path goes (a slanted cut).
+   *  The section may be given for each point of the path (a sleeve that follows a beam whose section changes along it). */
+  sweep(path: V3[], U: V3, V: V3, sec: number[][] | ((k: number) => number[][]), col: V3, part: number | ((i: number) => number), wide?: (k: number) => number, shift?: (k: number, u: number, v: number, i: number) => number, colOf?: (i: number) => V3, axis?: V3){
+    const secs = path.map((_, k) => typeof sec === 'function' ? sec(k) : sec), n = secs[0].length, along = axis ?? norm(sub(path[path.length - 1], path[0]));
     const pt = (k: number, i: number): V3 => {
-      const c = path[k], w = wide ? wide(k) : 1, u = sec[i][0], v = sec[i][1]*w, sh = shift ? shift(k, u, v) : 0;
+      const c = path[k], w = wide ? wide(k) : 1, u = secs[k][i][0], v = secs[k][i][1]*w, sh = shift ? shift(k, u, v, i) : 0;
       return [c[0] + U[0]*u + V[0]*v + along[0]*sh, c[1] + U[1]*u + V[1]*v + along[1]*sh, c[2] + U[2]*u + V[2]*v + along[2]*sh];
     };
     for (let i = 0; i < n; i++){
       const j = (i + 1)%n, pr = typeof part === 'number' ? part : part(i), cl = colOf ? colOf(i) : col;
-      const eu = sec[j][0] - sec[i][0], ev = sec[j][1] - sec[i][1];
-      // the facet's normal, out from the section's middle (the path may rise, which tips it a little along the way)
-      let mu = 0, mv = 0; for (const q of sec){ mu += q[0]/n; mv += q[1]/n; }
-      let nu = ev, nv = -eu;
-      if (nu*((sec[i][0] + sec[j][0])/2 - mu) + nv*((sec[i][1] + sec[j][1])/2 - mv) < 0){ nu = -nu; nv = -nv; }
       for (let k = 0; k + 1 < path.length; k++){
+        // the facet's normal, out from the section's middle (the path may rise, which tips it a little along the way)
+        const S = secs[k], eu = S[j][0] - S[i][0], ev = S[j][1] - S[i][1];
+        let mu = 0, mv = 0; for (const q of S){ mu += q[0]/n; mv += q[1]/n; }
+        let nu = ev, nv = -eu;
+        if (nu*((S[i][0] + S[j][0])/2 - mu) + nv*((S[i][1] + S[j][1])/2 - mv) < 0){ nu = -nu; nv = -nv; }
         const slope = sub(path[k + 1], path[k]), a = norm(slope);
         const f: V3 = norm([U[0]*nu + V[0]*nv, U[1]*nu + V[1]*nv, U[2]*nu + V[2]*nv]);
         const tip = -dot(f, a), nn = norm([f[0] + a[0]*tip, f[1] + a[1]*tip, f[2] + a[2]*tip]);
@@ -125,6 +129,7 @@ class Model {
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.N, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.C, 3));
     g.setAttribute('aPart', new THREE.Float32BufferAttribute(this.A, 1));
+    g.setAttribute('aRest', new THREE.Float32BufferAttribute(this.R, 3));
     addOutlineNormals(g);
     return g;
   }
@@ -132,17 +137,36 @@ class Model {
 const X: V3 = [1, 0, 0], Y: V3 = [0, 1, 0], Z: V3 = [0, 0, 1];
 /** A rectangle's section with its corners cut. */
 const chamfer = (hu: number, hv: number, c: number) => [[-hu + c, -hv], [hu - c, -hv], [hu, -hv + c], [hu, hv - c], [hu - c, hv], [-hu + c, hv], [-hu, hv - c], [-hu, -hv + c]];
+/** A section pushed out by d all round: each side moved out along its normal, each corner where its two moved sides meet. What wraps a
+ *  beam of that section stands d off it everywhere. */
+function proudOf(sec: number[][], d: number){
+  const n = sec.length;
+  let area = 0; for (let i = 0; i < n; i++){ const a = sec[i], b = sec[(i + 1)%n]; area += a[0]*b[1] - b[0]*a[1]; }
+  const o = Math.sign(area);   // (which way round it goes says which side is out)
+  const side = sec.map((a, i) => { const b = sec[(i + 1)%n], du = b[0] - a[0], dv = b[1] - a[1], l = Math.hypot(du, dv); return [a[0] + o*dv/l*d, a[1] - o*du/l*d, du, dv]; });
+  return side.map((q, i) => {
+    const p = side[(i + n - 1)%n], t = ((q[0] - p[0])*q[3] - (q[1] - p[1])*q[2])/(p[2]*q[3] - p[3]*q[2]);
+    return [p[0] + p[2]*t, p[1] + p[3]*t];
+  });
+}
+/** Gilt stands this far off the beam it is on, all round (as the 島木's sleeves were drawn): 7 to 12 cm on the gilt gates, two to four
+ *  times what the depth buffer can still tell apart at the far end of the near gates (about 3 cm at 520 m). */
+const CLEAR = 0.0035;
 
-/** The snow lying along a beam: a lumpy, rounded cap, tapering to nothing at its ends. It waits inside the beam until the cold raises it
- *  (torii.vert.glsl reads how far from the red of its colour). */
-function snowCap(m: Model, x0: number, y: (x: number) => number, dz: (x: number) => number, h0: number, seed: number){
+/** The snow lying along a beam: a lumpy, rounded cap, tapering to nothing at its ends. With no cold it is gathered to a line along the
+ *  middle of the beam (mid), inside it; the cold grows it out from there to this shape (torii.vert.glsl, aRest). It comes up through the
+ *  top of the beam, and only its overhanging lip comes down onto the beam's faces, by their top edges, as the cold comes to its deepest.
+ *  (Its own colour stays near black: torii.frag.glsl paints it as snow.) */
+function snowCap(m: Model, x0: number, y: (x: number) => number, dz: (x: number) => number, h0: number, seed: number, mid: (x: number) => number){
   const N = 28, prof = [[-1.08, -0.15], [-0.94, 0.40], [-0.56, 0.86], [0, 1], [0.56, 0.86], [0.94, 0.40], [1.08, -0.15]], col: V3 = [h0, 0, 0];
   const at = (i: number, k: number): V3 => {
     const x = x0*(2*i/N - 1), lump = 0.74 + 0.18*Math.sin(x*41 + seed) + 0.10*Math.sin(x*97 + seed*2.3), end = Math.min(1, (x0 - Math.abs(x))/(x0*0.12));
     return [x, y(x) + prof[k][1]*h0*lump*end, prof[k][0]*dz(x)];
   };
   const nr = (k: number): V3 => norm([0, 1.0 + 0.2*prof[k][1], prof[k][0]*1.3]);
+  m.rest = p => [p[0], mid(p[0]), 0];
   for (let i = 0; i < N; i++) for (let k = 0; k + 1 < prof.length; k++) m.quad(at(i, k), at(i + 1, k), at(i + 1, k + 1), at(i, k + 1), nr(k), nr(k), nr(k + 1), nr(k + 1), col, PART.SNOW);
+  m.rest = null;
 }
 
 /** 朱門 and 火羽: the one mesh; the 火羽 parts are hidden on the 朱門 grade by the vertex shader. */
@@ -187,31 +211,40 @@ export function buildRedTorii(){
   // 島木: vermilion, on the same curve as the beam over it, so the two lie together
   const SX = 0.475;
   m.sweep(row(SX, 24, 1, SHAPE.shimaY0 + 0.021), Y, Z, chamfer(0.021, 0.033, 0.004), RED, PART.SHIMA, undefined, (k, u) => (k === 0 ? -1 : k === 24 ? 1 : 0)*(u + 0.021)*0.28);
-  // 笠木: black lacquer, its top a little wider, as the weathering board over it, and crowned; cut at a slant, top reaching furthest
-  const KX = SHAPE.kasaX, K = 28;
+  // 笠木: black lacquer, its top a little wider, as the weathering board over it, and crowned; cut at a slant, top reaching furthest. It
+  // widens toward its ends, and its cut carries the end's own section on, level
+  const KX = SHAPE.kasaX, K = 28, CUT = 0.34, kasaRow = row(KX, K, 1, SHAPE.kasaY0);
   const sec = [[0, -0.037], [0, 0.037], [0.030, 0.040], [0.032, 0.0462], [0.052, 0.0462], [0.0585, 0.031], [0.062, 0.0], [0.0585, -0.031], [0.052, -0.0462], [0.032, -0.0462], [0.030, -0.040]];
-  const wide = (k: number) => 1 + 0.22*Math.abs(2*k/K - 1);
-  m.sweep(row(KX, K, 1, SHAPE.kasaY0), Y, Z, sec, BLACK, i => i >= 3 && i <= 8 ? PART.CAP : PART.KASA, wide, (k, u) => (k === 0 ? -1 : k === K ? 1 : 0)*u*0.34);
-  // gilt sleeves on the ends of both beams, with a row of studs (乳金物) (火羽 only)
+  const kasaWide = (x: number) => 1 + 0.22*Math.min(1, Math.abs(x)/KX);
+  /** The 笠木's middle line at x as its sweep lays it: straight between its points, level past its ends */
+  const kasaAt = (x: number): V3 => { const t = Math.min(K, Math.max(0, (x + KX)/(2*KX)*K)), k = Math.min(K - 1, Math.floor(t)), a = kasaRow[k], b = kasaRow[k + 1]; return [x, a[1] + (b[1] - a[1])*(t - k), 0]; };
+  m.sweep(kasaRow, Y, Z, sec, BLACK, i => i >= 3 && i <= 8 ? PART.CAP : PART.KASA, k => kasaWide(kasaRow[k][0]), (k, u) => (k === 0 ? -1 : k === K ? 1 : 0)*u*CUT);
+  // gilt on the 笠木 (火羽 only). A sleeve from x0 to x1 is laid as the beam is, on the beam's own points between, each section the beam's
+  // own there pushed CLEAR out all round, so no corner of the lacquer comes up to the gilt. A sleeve that runs to the beam's end (±KX) is
+  // cut there as the beam is, point for point, and carried on past the cut as far as stands CLEAR off it
+  const sleeveSec = (x: number) => proudOf(sec.map(([u, v]) => [u, v*kasaWide(x)]), CLEAR);
+  const sleeve = (x0: number, x1: number) => {
+    const xs = [x0, ...kasaRow.map(p => p[0]).filter(x => x > x0 && x < x1), x1];
+    if (x1 >= KX) xs.push(KX + CLEAR*Math.hypot(1, CUT));
+    if (x0 <= -KX) xs.unshift(-KX - CLEAR*Math.hypot(1, CUT));
+    m.sweep(xs.map(kasaAt), Y, Z, k => sleeveSec(xs[k]), GOLD, PART.GOLD, undefined, (k, _u, _v, i) => Math.abs(xs[k]) >= KX ? Math.sign(xs[k])*sec[i][0]*CUT : 0, undefined, X);
+  };
+  // its studs (乳金物), at height u over the beam's foot: their middles 0.002 off the gilt's face, so half sunk in it
+  const faceAt = (S: number[][], u: number) => { let v = -Infinity; for (let i = 0; i < S.length; i++){ const a = S[i], b = S[(i + 1)%S.length]; if (a[0] !== b[0] && (a[0] - u)*(b[0] - u) <= 0) v = Math.max(v, a[1] + (b[1] - a[1])*(u - a[0])/(b[0] - a[0])); } return v; };
   const STUD: V3[] = [];
+  const stud = (x: number, u: number) => { const y = kasaAt(x)[1] + u, z = faceAt(sleeveSec(x), u) + 0.002; STUD.push([x, y, -z], [x, y, z]); };
+  // sleeves on the ends of both beams, with a row of studs
   for (const s of [-1, 1]){
-    const kasaEnd = (x: number): V3 => [s*x, SHAPE.kasaY0 + kasaRise(x), 0];
-    const pts = [0.500, 0.525, 0.550, 0.585].map(kasaEnd);
-    // (the sleeve follows the beam's own section, a little proud of it)
-    const proud = [[-0.003, -0.041], [-0.003, 0.041], [0.030, 0.0445], [0.034, 0.0505], [0.056, 0.0505], [0.063, 0.034], [0.0665, 0.0], [0.063, -0.034], [0.056, -0.0505], [0.034, -0.0505], [0.030, -0.0445]];
-    const pth = s > 0 ? pts : [...pts].reverse();
-    m.sweep(pth, Y, Z, proud, GOLD, PART.GOLD, () => 1 + 0.20*0.88, (k, u) => (k === (s > 0 ? pts.length - 1 : 0) ? s : 0)*u*0.34);
+    sleeve(s > 0 ? 0.500 : -KX, s > 0 ? KX : -0.500);
     const shEnd = (x: number): V3 => [s*x, SHAPE.shimaY0 + 0.021 + kasaRise(x), 0];
     const p2 = [0.420, 0.450, 0.480].map(shEnd);
-    m.sweep(s > 0 ? p2 : [...p2].reverse(), Y, Z, chamfer(0.0245, 0.0365, 0.004), GOLD, PART.GOLD, undefined, (k, u) => (k === (s > 0 ? 2 : 0) ? s : 0)*(u + 0.021)*0.28);
-    for (const x of [0.513, 0.538, 0.562]) for (const z of [-1, 1]){ const c = kasaEnd(x); STUD.push([c[0], c[1] + 0.018, z*0.0555]); STUD.push([c[0], c[1] + 0.044, z*0.0585]); }
+    m.sweep(s > 0 ? p2 : [...p2].reverse(), Y, Z, chamfer(0.021 + CLEAR, 0.033 + CLEAR, 0.004), GOLD, PART.GOLD, undefined, (k, u) => (k === (s > 0 ? 2 : 0) ? s : 0)*(u + 0.021)*0.28);
+    for (const x of [0.513, 0.538, 0.562]){ stud(s*x, 0.018); stud(s*x, 0.044); }
   }
   // the mount in the middle of the top beam: a gilt sleeve over it, and on that two sockets the feathers' quills go into
   {
-    const pts: V3[] = [-0.085, -0.04, 0, 0.04, 0.085].map(x => [x, SHAPE.kasaY0 + kasaRise(x), 0]);
-    const proud = [[-0.003, -0.041], [-0.003, 0.041], [0.030, 0.0445], [0.034, 0.0505], [0.056, 0.0505], [0.0635, 0.034], [0.067, 0.0], [0.0635, -0.034], [0.056, -0.0505], [0.034, -0.0505], [0.030, -0.0445]];
-    m.sweep(pts, Y, Z, proud, GOLD, PART.GOLD);
-    for (const x of [-0.066, -0.040, 0.040, 0.066]) for (const z of [-1, 1]){ STUD.push([x, SHAPE.kasaY0 + 0.016, z*0.0448]); STUD.push([x, SHAPE.kasaY0 + 0.045, z*0.0525]); }
+    sleeve(-0.085, 0.085);
+    for (const x of [-0.066, -0.040, 0.040, 0.066]){ stud(x, 0.016); stud(x, 0.045); }
     const l = Math.tan(FEATHER.tilt), t = BEAM_TOP;
     for (const s of [-1, 1]) m.lathe(s*FEATHER.x, FEATHER.y, s*l, 0, [[t - 0.012, 0.0120], [t + 0.002, 0.0190], [t + 0.008, 0.0165], [t + 0.014, 0.0110], [t + 0.034, 0.0110], [t + 0.038, 0.0140], [t + 0.048, 0.0140], [t + 0.051, 0.0085]], 12, GOLD, PART.GOLD);
   }
@@ -229,8 +262,9 @@ export function buildRedTorii(){
       m.quad(a, b, c, d, f, f, f, f, PAPER, PART.PAPER); m.quad(a, b, c, d, g, g, g, g, PAPER, PART.PAPER);
     }
   }
-  snowCap(m, SHAPE.kasaX + 0.01, x => SHAPE.kasaY0 + kasaRise(x) + 0.056, x => 0.052*(1 + 0.22*Math.abs(x)/SHAPE.kasaX), 0.036, 1.3);
-  snowCap(m, 0.40, () => SHAPE.nukiY + 0.022, () => 0.021, 0.022, 4.1);
+  // (each gathered on its beam's middle: half the 笠木's height up, the 貫's own middle)
+  snowCap(m, SHAPE.kasaX + 0.01, x => SHAPE.kasaY0 + kasaRise(x) + 0.056, x => 0.052*(1 + 0.22*Math.abs(x)/SHAPE.kasaX), 0.036, 1.3, x => kasaAt(x)[1] + 0.031);
+  snowCap(m, 0.40, () => SHAPE.nukiY + 0.022, () => 0.021, 0.022, 4.1, () => SHAPE.nukiY);
   return m.geo();
 }
 
@@ -252,8 +286,8 @@ export function buildWoodTorii(){
   // a short strut from it up to the log, and on it a bare board, both faces, with the night's date in ink
   m.prism([0, 0.712, 0], [0, 0.915, 0], X, Z, chamfer(0.022, 0.0125, 0.003), WOOD, PART.WOOD);
   for (const s of [-1, 1]) m.prism([0, 0.812 - 0.052, s*0.017], [0, 0.812 + 0.052, s*0.017], X, Z, chamfer(0.048, 0.0052, 0.0015), PALE_WOOD, PART.WOOD_BOARD);
-  snowCap(m, 0.54, () => TOP + 0.024, () => 0.036, 0.036, 2.7);
-  snowCap(m, 0.36, () => 0.70 + 0.019, () => 0.017, 0.020, 5.2);
+  snowCap(m, 0.54, () => TOP + 0.024, () => 0.036, 0.036, 2.7, () => TOP);
+  snowCap(m, 0.36, () => 0.70 + 0.019, () => 0.017, 0.020, 5.2, () => 0.70);
   return m.geo();
 }
 

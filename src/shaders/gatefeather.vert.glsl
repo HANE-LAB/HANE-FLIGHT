@@ -10,10 +10,10 @@ void main(){
   float a = iB.w*2.1 + side, b = iB.w*1.3 + side*0.7;
   p.x += (sin(uTime*1.7 + a) + 3.5*iG.z*sin(uTime*5.7 + a))*0.012*u2;
   p.z += (sin(uTime*2.3 + b) + 3.5*iG.z*sin(uTime*7.3 + b))*0.018*u2 + 0.05*iG.z*u2;
-  vec3 w = toriiPlace(p);
-  vW = w;
+  vec3 off = toriiOffset(p);
+  vW = iA.xyz + off;
   vIg = smoothstep(0.72, 0.98, iC.x);   // they catch when the fire reaches the middle of the top beam, from the quill up
-  gl_Position = projectionMatrix*viewMatrix*vec4(w, 1.0);
+  gl_Position = toriiClip(off);
   // only on the gates of the big nights (kind 2)
   if (iB.z < 1.5 || vIg <= 0.0) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
 }

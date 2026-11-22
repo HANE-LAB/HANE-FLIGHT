@@ -1,5 +1,5 @@
 #include <flight/torii>
-attribute float aPart;
+attribute float aPart; attribute vec3 aRest;
 varying vec3 vC; varying vec3 vN; varying vec3 vW; varying vec3 vP; varying float vPart;
 varying vec3 vGate;   // kind, lantern, day
 varying float vQ;     // how far it has come
@@ -13,14 +13,15 @@ void main(){
   vec3 pos = position;
   // the paper flutters; it is hung from the rope, so the lower the more
   if (aPart > 11.5 && aPart < 12.5){ float d = max(0.61 - pos.y, 0.0)*(1.0 + 3.0*uWind), h = max(0.59 - pos.y, 0.0); pos.z += sin(uTime*7.0 + pos.x*60.0 + pos.y*30.0)*(d*0.22 + h*0.6*iG.z) + h*3.0*iG.x; pos.x += sin(uTime*5.0 + pos.x*40.0)*(d*0.08 + h*0.3*iG.z); }
-  // the snow on the beams rises out of them as the cold goes on (how far up: its colour's red)
-  if (aPart > 15.5) pos.y -= (1.0 - uSnow)*color.r*1.25;
-  vec3 w = toriiPlace(pos);
+  // the snow on the beams: with no cold it is gathered to a line along the middle of its beam (aRest, src/toriimodel.ts), and the cold
+  // grows it out from there to its whole shape, up through the top of the beam
+  if (aPart > 15.5) pos = mix(aRest, pos, uSnow);
+  vec3 off = toriiOffset(pos), w = iA.xyz + off;
   vQ = iC.x; vW = w; vP = position; vPart = aPart; vC = color; vN = toriiTurn(normal);
   vGate = vec3(iB.z, iC.y, iB.w); vDate = iB.y;
 #if WRITING
   vWrit = iD; vWrit2 = iE;
 #endif
-  gl_Position = projectionMatrix*viewMatrix*vec4(w, 1.0);
+  gl_Position = toriiClip(off);
   if (iC.x <= 0.0 || !toriiWears(aPart)) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
 }
